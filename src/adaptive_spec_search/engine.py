@@ -87,9 +87,19 @@ class HybridSearchEngine:
         synonyms: Mapping[str, Sequence[str]] | None = None,
         rrf_k: int = 60,
         feedback_weight: float = 0.001,
+        max_documents: int = 100_000,
+        max_text_chars: int = 2_000_000,
     ):
         if not documents:
             raise ValueError("at least one document is required")
+        if len(documents) > max_documents:
+            raise ValueError("document limit exceeded")
+        if len({doc.id for doc in documents}) != len(documents):
+            raise ValueError("document ids must be unique")
+        if any(not doc.id or len(doc.text) > max_text_chars for doc in documents):
+            raise ValueError("document id is empty or document text limit exceeded")
+        if rrf_k <= 0 or feedback_weight < 0:
+            raise ValueError("rrf_k must be positive and feedback_weight non-negative")
         self.documents = {doc.id: doc for doc in documents}
         self.bm25 = BM25Index(documents)
         self.embed = embed
@@ -100,7 +110,20 @@ class HybridSearchEngine:
         self.document_vectors = None
         if embed:
             self.document_vectors = list(embed([doc.text for doc in documents]))
+            self._validate_vectors(self.document_vectors, len(documents))
             self._vector_ids = [doc.id for doc in documents]
+
+    @staticmethod
+    def _validate_vectors(vectors: Sequence[Sequence[float]], expected: int) -> None:
+        if len(vectors) != expected or not vectors:
+            raise ValueError("embedding function must return one vector per input")
+        width = len(vectors[0])
+        if width == 0:
+            raise ValueError("embedding vectors must not be empty")
+        if any(len(vector) != width for vector in vectors):
+            raise ValueError("embedding vectors must have equal dimensions")
+        if any(not math.isfinite(float(value)) for vector in vectors for value in vector):
+            raise ValueError("embedding vectors must contain finite numeric values")
 
     def expand_query(self, query: str, max_terms: int = 8) -> str:
         """Apply an audited dictionary only; no unconstrained LLM expansion."""
@@ -113,13 +136,21 @@ class HybridSearchEngine:
                     return query + " " + " ".join(additions)
         return query + (" " + " ".join(additions) if additions else "")
 
-    def _dense_search(self, query: str, limit: int) -> list[tuple[str, float]]:
+    def _dense_search(
+        self, query: str, limit: int, eligible_ids: set[str]
+    ) -> list[tuple[str, float]]:
         if not self.embed or self.document_vectors is None:
             return []
-        query_vector = list(self.embed([query])[0])
+        query_rows = list(self.embed([query]))
+        self._validate_vectors(query_rows, 1)
+        query_vector = list(query_rows[0])
+        if len(query_vector) != len(self.document_vectors[0]):
+            raise ValueError("query and document embedding dimensions differ")
         query_norm = math.sqrt(sum(value * value for value in query_vector)) or 1.0
         scored = []
         for doc_id, vector in zip(self._vector_ids, self.document_vectors):
+            if doc_id not in eligible_ids:
+                continue
             norm = math.sqrt(sum(value * value for value in vector)) or 1.0
             score = sum(a * b for a, b in zip(query_vector, vector)) / (query_norm * norm)
             scored.append((doc_id, score))
@@ -139,10 +170,26 @@ class HybridSearchEngine:
         expand: bool = True,
         metadata_filter: Mapping[str, str] | None = None,
     ) -> list[SearchResult]:
+        if not query.strip():
+            return []
+        if limit <= 0 or candidate_limit <= 0:
+            raise ValueError("limit and candidate_limit must be positive")
+        eligible_ids = {
+            doc.id
+            for doc in self.documents.values()
+            if not metadata_filter
+            or all(doc.metadata.get(key) == value for key, value in metadata_filter.items())
+        }
+        if not eligible_ids:
+            return []
         retrieval_query = self.expand_query(query) if expand else query
         arms = {
-            "bm25": self.bm25.search(retrieval_query, candidate_limit),
-            "dense": self._dense_search(query, candidate_limit),
+            "bm25": [
+                row
+                for row in self.bm25.search(retrieval_query, len(self.documents))
+                if row[0] in eligible_ids
+            ][:candidate_limit],
+            "dense": self._dense_search(query, candidate_limit, eligible_ids),
         }
         fused: defaultdict[str, float] = defaultdict(float)
         ranks: defaultdict[str, dict[str, int]] = defaultdict(dict)
@@ -167,10 +214,6 @@ class HybridSearchEngine:
         results = []
         for doc_id, score in fused.items():
             document = self.documents[doc_id]
-            if metadata_filter and any(
-                document.metadata.get(key) != value for key, value in metadata_filter.items()
-            ):
-                continue
             results.append(SearchResult(document, score, ranks[doc_id]))
         return sorted(results, key=lambda row: (-row.score, row.document.id))[:limit]
 

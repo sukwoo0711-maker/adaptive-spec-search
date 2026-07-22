@@ -14,6 +14,10 @@ The reference pipeline separates candidate recall from candidate precision.
 6. Optionally rerank a bounded candidate list with a query-document model.
 7. Return source identifiers with evidence; generation is a separate stage.
 
+“No result” is not evidence of absence. Preserve distinct states for an empty
+corpus, parser/index failure, stale index, authorization filtering, no lexical
+or dense match, and a result rejected by an answer-stage evidence policy.
+
 Keyword, dense, query expansion, and reranking components address different
 failure modes. They should remain independently observable so a degraded arm
 cannot silently masquerade as hybrid search.
@@ -80,6 +84,8 @@ intervals are preferable when multiple queries refer to the same source.
 - Version indexes, glossaries, embedding models, rerankers, and evaluation sets.
 - Treat model-generated query text and retrieved documents as untrusted input.
 - Provide abstention and human escalation for weak or conflicting evidence.
+- Enforce authorization before documents reach an embedding provider. A later
+  metadata filter cannot revoke content already disclosed during embedding.
 
 ## Further reading
 

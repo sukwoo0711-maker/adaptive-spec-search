@@ -50,3 +50,50 @@ def test_unknown_feedback_document_is_rejected():
         pass
     else:
         raise AssertionError("unknown document feedback must fail")
+
+
+def test_duplicate_document_ids_are_rejected():
+    try:
+        HybridSearchEngine([Document("same", "one"), Document("same", "two")])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("duplicate ids make provenance ambiguous")
+
+
+def test_metadata_filter_applies_before_dense_scoring():
+    calls = []
+
+    def embed(texts):
+        calls.append(list(texts))
+        return [[float(len(text))] for text in texts]
+
+    engine = HybridSearchEngine(
+        [
+            Document("public", "public requirement", {"access": "public"}),
+            Document("secret", "secret requirement", {"access": "restricted"}),
+        ],
+        embed=embed,
+    )
+    result = engine.search("requirement", metadata_filter={"access": "public"})
+    assert [row.document.id for row in result] == ["public"]
+
+
+def test_invalid_embedding_shape_is_rejected():
+    try:
+        HybridSearchEngine([Document("a", "one"), Document("b", "two")], embed=lambda _: [[1.0]])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("one vector per document is required")
+
+
+def test_empty_query_abstains_and_invalid_limits_fail():
+    engine = HybridSearchEngine([Document("a", "one")])
+    assert engine.search("   ") == []
+    try:
+        engine.search("one", limit=0)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("invalid limits must fail closed")

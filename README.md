@@ -107,5 +107,13 @@ python -m pytest -q
 Experimental reference implementation. Review the scoring, persistence,
 authorization, and evaluation design before production use.
 
+An empty result means “no eligible candidate was retrieved by this configured
+pipeline,” not “the specification has no answer.” Scores are ranking signals,
+not probabilities. The package itself makes no network request, but an injected
+embedding callable can transmit documents and queries; confidential deployments
+should use a trusted local implementation or an explicitly approved provider.
+
 See [architecture and evaluation notes](docs/ARCHITECTURE.md) for feedback
 promotion, overfitting controls, security boundaries, and staged evaluation.
+See [the adversarial review](AUTO_GRILL.md) and
+[deployment decisions](PORTING-DECISION-REQUIRED.md) before reuse.
