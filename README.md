@@ -95,6 +95,27 @@ Local, hosted, and hybrid deployments should be compared on the same workload,
 including quality, latency, throughput, memory, energy, security, maintenance,
 and failure recovery.
 
+## Token budget and escalation
+
+When a language model is available but its tokens are the scarce resource,
+treat retrieval as a cost tier, not only a quality stage. BM25, audited
+dictionary expansion, Reciprocal Rank Fusion, and local embedding similarity
+are ordinary computation, not model calls, so this path answers at zero token
+cost. Make it the default answer path and drive as many queries as possible to
+terminate there.
+
+Reserve paid model calls (hosted generation or a generative reranker) for a
+bounded, already-ranked candidate set. Rerank or synthesize over the top fused
+candidates, never over the raw corpus: input token cost scales with candidates
+times length, so `candidate_limit` is also a spend control. Prefer audited
+dictionary expansion to generative query expansion — it raises recall at zero
+token cost and removes a model round-trip.
+
+Make escalation explicit and measured. Abstention is one branch and a paid call
+is another, so the escalation rate and its token cost should be tracked metrics
+rather than an uncontrolled default. Keep a token-free fallback so an exhausted
+budget degrades to the fused ranking instead of failing.
+
 ## Development
 
 ```powershell

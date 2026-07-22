@@ -87,6 +87,26 @@ intervals are preferable when multiple queries refer to the same source.
 - Enforce authorization before documents reach an embedding provider. A later
   metadata filter cannot revoke content already disclosed during embedding.
 
+## Token budget and escalation
+
+When a language model is available but its tokens are the scarce resource, treat
+retrieval as a cost tier, not just a quality stage.
+
+- Tier 0 (no token cost): lexical retrieval, dictionary expansion, fusion, and
+  local embedding similarity. This is the default answer path; maximize the
+  fraction of queries that terminate here.
+- Tier 1 (bounded token cost): rerank only the top fused candidates. A local
+  cross-encoder keeps this at zero token cost; a hosted reranker spends tokens
+  proportional to candidates times length, so keep the candidate set small.
+- Tier 2 (largest token cost): generation, multi-hop reasoning, or synthesis.
+  Enter only when lower tiers cannot answer, and record why.
+
+Better lexical and dense recall is itself a token-saving mechanism: placing the
+answer inside the top-k either removes the model call or shrinks its context.
+Log which queries escalate, at what tier, and at what token cost, and alert when
+the escalation rate drifts. Keep a token-free fallback path so an exhausted
+budget degrades to fused ranking rather than failing.
+
 ## Further reading
 
 - [TREC Retrieval-Augmented Generation Track](https://trec-rag.github.io/)
